@@ -144,6 +144,21 @@ fi
 
 patch -p1 < "$SUSFS_PATCH" || true
 
+# 修复 6.1.145：SUSFS 补丁已 rebase 到 6.1.176，namespace.c 头部 hunk 因
+# 6.1.145 不再包含 <trace/hooks/blk.h> 而被拒绝；补回该 hunk 应添加的声明。
+if [[ "${ANDROID_VERSION:-}" == "android14" && "${KERNEL_VERSION:-}" == "6.1" ]] \
+  && grep -q 'DEFAULT_KSU_MNT_ID' fs/namespace.c; then
+  if ! grep -qF '#include <linux/susfs_def.h>' fs/namespace.c; then
+    echo "SUSFS: 补回 namespace.c 缺少的 susfs_def.h"
+    sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux\/susfs_def.h>\n#endif' fs/namespace.c
+  fi
+  if ! grep -q 'extern bool susfs_is_current_ksu_domain' fs/namespace.c; then
+    echo "SUSFS: 补回 namespace.c 缺少的 SUS_MOUNT 声明"
+    sed -i '/#include "internal.h"/a \\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n\n#define CL_COPY_MNT_NS BIT(25)\n\n#endif' fs/namespace.c
+  fi
+  rm -f fs/namespace.c.rej
+fi
+
 # 为尚未提供 SU 会话 FD 接口的 SukiSU/BakaSU 恢复旧版 exec hook 行为
 EXEC_HELPER=""
 if [[ "$KSU_VARIANT" == SukiSU* || "$KSU_VARIANT" == "BakaSU" ]]; then
